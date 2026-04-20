@@ -1,6 +1,15 @@
 const crypto = require('crypto');
 const express = require('express');
 const dotenv = require('dotenv');
+const { parseIntent } = require('./chat/intents');
+const {
+  searchProducts,
+  findProductBySkuOrName,
+  formatSearchReply,
+  formatPriceReply,
+  formatOrderReply,
+  formatHelpReply,
+} = require('./chat/replies');
 
 dotenv.config();
 
@@ -113,7 +122,21 @@ app.post('/webhook', validateRequestSignature, async (req, res) => {
     });
 
     if (senderPhone && messageText) {
-      await sendWhatsAppMessage(senderPhone, `You said: ${messageText}`);
+      const intent = parseIntent(messageText);
+      let reply = formatHelpReply();
+
+      if (intent.type === 'search') {
+        const matches = searchProducts(intent.keyword);
+        reply = formatSearchReply(intent.keyword, matches);
+      } else if (intent.type === 'price') {
+        const product = findProductBySkuOrName(intent.query);
+        reply = formatPriceReply(product, intent.query);
+      } else if (intent.type === 'order') {
+        const product = findProductBySkuOrName(intent.sku);
+        reply = formatOrderReply(product, intent.quantity);
+      }
+
+      await sendWhatsAppMessage(senderPhone, reply);
     }
 
     return res.status(200).json({ status: 'received' });
