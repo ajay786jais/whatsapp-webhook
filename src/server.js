@@ -1,6 +1,15 @@
 const crypto = require('crypto');
 const express = require('express');
 const dotenv = require('dotenv');
+const { parseIntent } = require('./chat/intents');
+const {
+  searchProducts,
+  findProductBySkuOrName,
+  formatSearchReply,
+  formatPriceReply,
+  formatOrderReply,
+  formatHelpReply,
+} = require('./chat/replies');
 
 const {
   initDatabase,
@@ -203,44 +212,22 @@ app.post('/webhook', validateRequestSignature, async (req, res) => {
     messageId,
   });
 
-  try {
-    if (messageId && (await isMessageProcessed(messageId))) {
-      logInfo(req, {
-        phone: senderPhone,
-        intent,
-        outcome: 'duplicate_skipped',
-        messageId,
-      });
+    if (senderPhone && messageText) {
+      const intent = parseIntent(messageText);
+      let reply = formatHelpReply();
 
-      return res.status(200).json({ status: 'ignored', reason: 'Duplicate message' });
-    }
+      if (intent.type === 'search') {
+        const matches = searchProducts(intent.keyword);
+        reply = formatSearchReply(intent.keyword, matches);
+      } else if (intent.type === 'price') {
+        const product = findProductBySkuOrName(intent.query);
+        reply = formatPriceReply(product, intent.query);
+      } else if (intent.type === 'order') {
+        const product = findProductBySkuOrName(intent.sku);
+        reply = formatOrderReply(product, intent.quantity);
+      }
 
-    if (intent === 'create_order') {
-      const order = await createOrderFromMessage(messageText);
-      await sendWhatsAppMessage(senderPhone, `Order created successfully. Order ID: ${order.orderId}`);
-      logInfo(req, {
-        phone: senderPhone,
-        intent,
-        outcome: 'order_created',
-        messageId,
-        orderId: order.orderId,
-      });
-    } else if (senderPhone && messageText) {
-      await sendWhatsAppMessage(senderPhone, `You said: ${messageText}`);
-      logInfo(req, {
-        phone: senderPhone,
-        intent,
-        outcome: 'echo_sent',
-        messageId,
-      });
-    }
-
-    if (messageId) {
-      await markMessageProcessed({
-        messageId,
-        phone: senderPhone,
-        intent,
-      });
+      await sendWhatsAppMessage(senderPhone, reply);
     }
 
     return res.status(200).json({ status: 'received' });
